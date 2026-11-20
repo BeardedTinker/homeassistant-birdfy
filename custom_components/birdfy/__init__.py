@@ -39,6 +39,7 @@ from .coordinator import (
     BirdfyMomentsCoordinator,
     BirdfyRecapCoordinator,
 )
+from .frontend import async_register_frontend
 from .moments_fetcher import BirdfyMomentsFetcher
 from .services import async_setup_services
 
@@ -49,8 +50,9 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up shared Birdfy response services."""
+    """Set up shared Birdfy services and bundled frontend."""
     async_setup_services(hass)
+    await async_register_frontend(hass)
     return True
 
 
