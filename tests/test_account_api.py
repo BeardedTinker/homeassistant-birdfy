@@ -34,7 +34,13 @@ package = types.ModuleType("birdfy_account_test")
 package.__path__ = [str(PACKAGE_PATH)]
 sys.modules[package.__name__] = package
 
-for module_name in ("const", "media", "moments", "account_api"):
+for module_name in (
+    "const",
+    "config_data",
+    "media",
+    "moments",
+    "account_api",
+):
     spec = importlib.util.spec_from_file_location(
         f"{package.__name__}.{module_name}",
         PACKAGE_PATH / f"{module_name}.py",
@@ -104,7 +110,12 @@ class AuthenticationTest(unittest.IsolatedAsyncioTestCase):
     def test_password_digest_accepts_existing_digest(self) -> None:
         """Avoid hashing an already-hashed password twice."""
         digest = "A" * 32
-        self.assertEqual(account_api.password_digest(digest), digest.lower())
+        self.assertEqual(
+            sys.modules["birdfy_account_test.config_data"].password_digest(
+                digest
+            ),
+            digest.lower(),
+        )
 
     def test_signature_is_stable(self) -> None:
         """Protect the reverse-engineered signature algorithm."""

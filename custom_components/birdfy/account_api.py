@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-import hashlib
 import hmac
 import json
 import re
@@ -17,6 +16,7 @@ import uuid
 
 import aiohttp
 
+from .config_data import password_digest
 from .const import (
     AUTH_BASE_URL,
     CENTRAL_API_BASE_URL,
@@ -70,16 +70,6 @@ class BirdfyAuthState:
 CredentialsUpdatedCallback = Callable[[BirdfyAuthState], Awaitable[None]]
 
 
-def password_digest(password: str) -> str:
-    """Return the MD5 digest required by the Netvue login API."""
-    if re.fullmatch(r"[0-9a-fA-F]{32}", password):
-        return password.lower()
-    return hashlib.md5(  # noqa: S324 - required by the remote API
-        password.encode(),
-        usedforsecurity=False,
-    ).hexdigest()
-
-
 def compute_nvs_signature(
     token: str,
     ucid: str,
@@ -93,7 +83,7 @@ def compute_nvs_signature(
         return hmac.new(
             key.encode(),
             message.encode(),
-            hashlib.sha256,
+            "sha256",
         ).hexdigest()
 
     key = digest(f"nvs1{token}", str(ucid))

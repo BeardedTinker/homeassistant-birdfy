@@ -6,6 +6,13 @@ CONF_UUID = "uuid"
 CONF_RECAP_UUID = "recap_uuid"
 CONF_DATE_RANGE = "date_range"
 CONF_SUBENTRY_NAME = "name"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
+CONF_TOKEN = "token"
+CONF_REFRESH_TOKEN = "refresh_token"
+CONF_USER_ID = "user_id"
+CONF_REGION = "region"
+CONF_UDID = "udid"
 
 # Subentry types
 SUBENTRY_TYPE_DATE_RANGE = "date_range"
