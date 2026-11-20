@@ -34,7 +34,7 @@ package = types.ModuleType("birdfy_account_test")
 package.__path__ = [str(PACKAGE_PATH)]
 sys.modules[package.__name__] = package
 
-for module_name in ("const", "account_api"):
+for module_name in ("const", "media", "moments", "account_api"):
     spec = importlib.util.spec_from_file_location(
         f"{package.__name__}.{module_name}",
         PACKAGE_PATH / f"{module_name}.py",
@@ -285,6 +285,190 @@ class DeviceDiscoveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(devices), 1)
         self.assertEqual(devices[0]["deviceName"], "Garden Birdfy")
         self.assertEqual(devices[0]["ability"], {"ai": True})
+
+
+class MomentsEndpointTest(unittest.IsolatedAsyncioTestCase):
+    """Test Moments endpoint behavior and response filtering."""
+
+    async def test_tag_list_is_cached_by_validated_region(self) -> None:
+        """Fetch each regional tag list once."""
+        session = FakeSession(
+            requests=[
+                FakeResponse(
+                    200,
+                    [
+                        {
+                            "key": "3_northern_cardinal",
+                            "name": "Northern Cardinal",
+                        }
+                    ],
+                )
+            ]
+        )
+        client = account_api.BirdfyAccountApi(
+            session,
+            token="token",
+            user_id=42,
+            region="EU",
+        )
+
+        first = await client.async_get_tag_list()
+        second = await client.async_get_tag_list()
+
+        self.assertEqual(first["northern cardinal"], "Northern Cardinal")
+        self.assertIs(first, second)
+        self.assertEqual(len(session.request_calls), 1)
+        self.assertTrue(
+            session.request_calls[0]["url"].startswith(
+                "https://eu-api2.netvue.co/"
+            )
+        )
+
+    async def test_invalid_region_uses_default_host(self) -> None:
+        """Do not interpolate untrusted region values into a hostname."""
+        session = FakeSession(requests=[FakeResponse(200, [])])
+        client = account_api.BirdfyAccountApi(
+            session,
+            token="token",
+            user_id=42,
+            region="eu.example.test/path",
+        )
+
+        await client.async_get_tag_list()
+
+        self.assertTrue(
+            session.request_calls[0]["url"].startswith(
+                "https://api2.netvue.co/"
+            )
+        )
+
+    async def test_bydate_failure_falls_back_and_encodes_serial(self) -> None:
+        """Fall back to the range endpoint without exposing path separators."""
+        session = FakeSession(
+            requests=[
+                FakeResponse(404, {"ret": 404}),
+                FakeResponse(
+                    200,
+                    {"ret": 0, "events": [{"alarmId": "newest"}]},
+                ),
+            ]
+        )
+        client = account_api.BirdfyAccountApi(
+            session,
+            token="token",
+            user_id=42,
+        )
+
+        events = await client.async_get_events(
+            "SERIAL/../OTHER",
+            "today",
+            timezone_name="UTC",
+        )
+
+        self.assertEqual(events, [{"alarmId": "newest"}])
+        self.assertIn(
+            "SERIAL%2F..%2FOTHER",
+            session.request_calls[0]["url"],
+        )
+        self.assertEqual(len(session.request_calls), 2)
+
+    async def test_media_resolver_filters_non_http_urls(self) -> None:
+        """Only expose absolute HTTP(S) media links."""
+        session = FakeSession(
+            requests=[
+                FakeResponse(
+                    200,
+                    {
+                        "ret": 0,
+                        "eventList": [
+                            {
+                                "alarmId": 7,
+                                "videoFileList": [
+                                    "https://example.test/video.mp4",
+                                    "file:///private/video.mp4",
+                                ],
+                                "picList": (
+                                    '["https://example.test/image.jpg",'
+                                    ' "javascript:alert(1)"]'
+                                ),
+                            }
+                        ],
+                    },
+                )
+            ]
+        )
+        client = account_api.BirdfyAccountApi(
+            session,
+            token="token",
+            user_id=42,
+        )
+
+        media = await client.async_resolve_media(
+            "SERIAL",
+            [
+                {
+                    "alarmId": 7,
+                    "description": '{"recordDir": "dir"}',
+                    "pictureList": "one.jpg,two.jpg",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            media,
+            {
+                7: {
+                    "videos": ["https://example.test/video.mp4"],
+                    "images": ["https://example.test/image.jpg"],
+                }
+            },
+        )
+        payload = session.request_calls[0]["json"]
+        self.assertEqual(
+            payload["eventList"][0]["pictureList"],
+            ["one.jpg", "two.jpg"],
+        )
+
+    async def test_count_endpoints_normalize_responses(self) -> None:
+        """Convert total counts and discard malformed species entries."""
+        session = FakeSession(
+            requests=[
+                FakeResponse(200, {"ret": 0, "total": "12"}),
+                FakeResponse(
+                    200,
+                    {
+                        "ret": 0,
+                        "tagCountList": [
+                            {"tag": "Robin", "count": 3},
+                            "invalid",
+                        ],
+                    },
+                ),
+            ]
+        )
+        client = account_api.BirdfyAccountApi(
+            session,
+            token="token",
+            user_id=42,
+        )
+
+        total = await client.async_get_event_count(
+            "SERIAL",
+            100,
+            200,
+        )
+        counts = await client.async_get_species_counts(
+            "SERIAL",
+            100,
+            200,
+        )
+
+        self.assertEqual(total, 12)
+        self.assertEqual(counts, [{"tag": "Robin", "count": 3}])
+        self.assertEqual(
+            session.request_calls[0]["params"]["queryStartTime"],
+            "100",
+        )
 
 
 if __name__ == "__main__":

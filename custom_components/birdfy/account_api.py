@@ -5,17 +5,29 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import hmac
 import json
 import re
 import time
 from typing import Any
+from urllib.parse import quote
 import uuid
 
 import aiohttp
 
-from .const import AUTH_BASE_URL, DEFAULT_UCID
+from .const import (
+    AUTH_BASE_URL,
+    CENTRAL_API_BASE_URL,
+    DATE_RANGE_TODAY,
+    DATE_RANGE_YESTERDAY,
+    DEFAULT_UCID,
+    MOMENTS_BASE_URL,
+    MOMENTS_BASE_URL_TEMPLATE,
+)
+from .media import is_http_url
+from .moments import date_range_timestamps, resolve_timezone
 
 RET_OK = 0
 RET_USER_SIGNATURE_INVALID = 73
@@ -32,6 +44,8 @@ AUTH_ERROR_CODES = {
     RET_USER_HAS_NEVER_LOGIN,
 }
 BIRDFY_PRODUCT_CODE_RE = re.compile(r"^[PQ][A-Z0-9]{2}$")
+REGION_RE = re.compile(r"^[a-z0-9-]+$")
+TAG_PREFIX_RE = re.compile(r"^\d+_")
 
 
 class BirdfyAccountApiError(Exception):
@@ -129,6 +143,7 @@ class BirdfyAccountApi:
         self._time_source = time_source
         self._clock_skew_ms = 0
         self._auth_lock = asyncio.Lock()
+        self._tag_cache: dict[str, dict[str, str]] = {}
 
     @property
     def auth_state(self) -> BirdfyAuthState:
@@ -172,6 +187,13 @@ class BirdfyAccountApi:
             }
         )
         return headers
+
+    def _moments_base_url(self, region: str | None = None) -> str:
+        """Return a validated regional Moments API base URL."""
+        normalized = (region or self._region).strip().lower()
+        if normalized and REGION_RE.fullmatch(normalized):
+            return MOMENTS_BASE_URL_TEMPLATE.format(region=normalized)
+        return MOMENTS_BASE_URL
 
     async def _async_read_json(self, response: Any) -> Any:
         """Read a JSON response with a stable integration error."""
@@ -413,3 +435,259 @@ class BirdfyAccountApi:
                 devices.append(device)
 
         return devices
+
+    async def async_get_tag_list(
+        self,
+        region: str | None = None,
+    ) -> dict[str, str]:
+        """Return a cached map of API tag keys to display names."""
+        base_url = self._moments_base_url(region)
+        if base_url in self._tag_cache:
+            return self._tag_cache[base_url]
+
+        data = await self._async_request(
+            "GET",
+            f"{base_url}moments/tagList",
+            params={"parentId": 0},
+        )
+        tag_map: dict[str, str] = {}
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                aliases = (
+                    item.get("key"),
+                    name,
+                    item.get("localizedKey"),
+                )
+                for alias in aliases:
+                    if alias:
+                        tag_map[str(alias).strip().lower()] = name
+
+                key = str(item.get("key") or "")
+                if TAG_PREFIX_RE.match(key):
+                    stripped = (
+                        TAG_PREFIX_RE.sub("", key)
+                        .replace("_", " ")
+                        .strip()
+                    )
+                    if stripped:
+                        tag_map[stripped.lower()] = name
+
+        self._tag_cache[base_url] = tag_map
+        return tag_map
+
+    async def async_get_event_count(
+        self,
+        serial_number: str,
+        start_time: int,
+        end_time: int,
+        *,
+        region: str | None = None,
+    ) -> int | None:
+        """Return the total number of Moments in a time range."""
+        data = await self._async_request(
+            "GET",
+            f"{self._moments_base_url(region)}devices/events/countByTime",
+            params={
+                "serialNumber": serial_number,
+                "queryStartTime": start_time,
+                "queryEndTime": end_time,
+            },
+        )
+        if not isinstance(data, dict) or data.get("total") is None:
+            return None
+        try:
+            return int(data["total"])
+        except (TypeError, ValueError):
+            return None
+
+    async def async_get_species_counts(
+        self,
+        serial_number: str,
+        start_time: int,
+        end_time: int,
+        *,
+        region: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return per-tag Moment counts in a time range."""
+        data = await self._async_request(
+            "GET",
+            f"{self._moments_base_url(region)}birdData/eventCount",
+            params={
+                "serialnumber": serial_number,
+                "startTime": start_time,
+                "endTime": end_time,
+            },
+        )
+        if not isinstance(data, dict):
+            return []
+        counts = (
+            data.get("tagCountList")
+            or data.get("counts")
+            or data.get("birdCountList")
+            or []
+        )
+        return [item for item in counts if isinstance(item, dict)]
+
+    async def async_get_events(
+        self,
+        serial_number: str,
+        date_range: str,
+        *,
+        timezone_name: str | None = None,
+        region: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return recent Moment events for a feeder."""
+        base_url = self._moments_base_url(region)
+        encoded_serial = quote(serial_number, safe="")
+        start_time, end_time = date_range_timestamps(
+            date_range,
+            timezone_name,
+        )
+        safe_limit = max(1, min(int(limit), 100))
+
+        if date_range in (DATE_RANGE_TODAY, DATE_RANGE_YESTERDAY) and start_time:
+            timezone = resolve_timezone(timezone_name)
+            start = datetime.fromtimestamp(start_time / 1000, tz=timezone)
+            params: dict[str, Any] = {
+                "limit": safe_limit,
+                "ignoreAiLabels": "false",
+                "endTime": end_time,
+            }
+            if timezone_name:
+                params["tz"] = timezone_name
+            try:
+                data = await self._async_request(
+                    "GET",
+                    (
+                        f"{base_url}devices/{encoded_serial}/events/bydate/"
+                        f"{start:%Y%m%d}"
+                    ),
+                    params=params,
+                )
+                if isinstance(data, dict) and isinstance(data.get("events"), list):
+                    return [
+                        event
+                        for event in data["events"]
+                        if isinstance(event, dict)
+                    ]
+            except BirdfyAccountApiError:
+                # Some account/device combinations do not expose bydate.
+                pass
+
+        params = {
+            "limit": safe_limit,
+            "ignoreAiLabels": "false",
+            "reverse": 1,
+            "startTime": start_time,
+            "endTime": end_time,
+        }
+        data = await self._async_request(
+            "GET",
+            f"{base_url}devices/{encoded_serial}/events",
+            params=params,
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+            return []
+        return [
+            event for event in data["events"] if isinstance(event, dict)
+        ]
+
+    async def async_resolve_media(
+        self,
+        serial_number: str,
+        events: list[dict[str, Any]],
+    ) -> dict[Any, dict[str, list[str]]]:
+        """Resolve temporary image and video URLs for Moment events."""
+        payload_events = []
+        for event in events[:50]:
+            alarm_id = event.get("alarmId")
+            if alarm_id is None:
+                continue
+            description = self._parse_mapping(event.get("description"))
+            pictures = self._parse_string_list(event.get("pictureList"))
+            payload_events.append(
+                {
+                    "serialnumber": serial_number,
+                    "alarmId": alarm_id,
+                    "dataGroup": ["video", "pic"],
+                    "recordDir": description.get("recordDir"),
+                    "recordUrl": description.get("recordUrl"),
+                    "pic": event.get("pic"),
+                    "pictureList": pictures,
+                    "labelMask": event.get("labelMask"),
+                    "type": event.get("type"),
+                }
+            )
+
+        if not payload_events:
+            return {}
+
+        data = await self._async_request(
+            "POST",
+            f"{CENTRAL_API_BASE_URL}event/downloadLink",
+            json_data={"eventList": payload_events},
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("eventList"), list):
+            return {}
+
+        resolved: dict[Any, dict[str, list[str]]] = {}
+        for item in data["eventList"]:
+            if not isinstance(item, dict) or item.get("alarmId") is None:
+                continue
+            resolved[item["alarmId"]] = {
+                "videos": [
+                    value
+                    for value in self._parse_string_list(
+                        item.get("videoFileList")
+                    )
+                    if is_http_url(value)
+                ],
+                "images": [
+                    value
+                    for value in self._parse_string_list(item.get("picList"))
+                    if is_http_url(value)
+                ],
+            }
+        return resolved
+
+    @staticmethod
+    def _parse_mapping(value: object) -> dict[str, Any]:
+        """Return a mapping from a JSON object or mapping value."""
+        if isinstance(value, dict):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return {}
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _parse_string_list(value: object) -> list[str]:
+        """Return non-empty strings from list, JSON-list or CSV input."""
+        if isinstance(value, list):
+            return [
+                str(item).strip()
+                for item in value
+                if str(item).strip()
+            ]
+        if not isinstance(value, str) or not value.strip():
+            return []
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [
+                str(item).strip()
+                for item in parsed
+                if str(item).strip()
+            ]
+        return [item.strip() for item in value.split(",") if item.strip()]

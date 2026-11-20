@@ -15,7 +15,10 @@ RECAP_API_URL = "https://api2.nvts.co/moments/community/recapData"
 
 # Reverse-engineered Netvue/Birdfy account API.
 AUTH_BASE_URL = "https://localweb.netvue.co/v1/"
+CENTRAL_API_BASE_URL = "https://centralapi.nvts.co/"
 DEFAULT_UCID = "513774810c"
+MOMENTS_BASE_URL = "https://api2.netvue.co/"
+MOMENTS_BASE_URL_TEMPLATE = "https://{region}-api2.netvue.co/"
 
 # Update interval in minutes
 DEFAULT_SCAN_INTERVAL = 15
