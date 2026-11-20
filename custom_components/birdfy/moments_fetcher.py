@@ -86,6 +86,11 @@ class BirdfyMomentsFetcher:
         self.device_name = str(
             device.get("deviceName") or serial_number
         ).strip()
+        self.device_model = str(
+            device.get("productName")
+            or device.get("productCode")
+            or "Birdfy Feeder"
+        ).strip()
         self.region = str(device.get("region") or "").strip() or None
         self.timezone_name = (
             str(device["timezone"]).strip()

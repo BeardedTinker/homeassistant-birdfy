@@ -39,7 +39,12 @@ from .const import (
     ATTR_RECAP_VIDEO_BUSIEST,
     ATTR_RECAP_VIDEO_HUMMINGBIRD,
 )
-from .coordinator import BirdfyHighlightsCoordinator, BirdfyRecapCoordinator
+from .coordinator import (
+    BirdfyHighlightsCoordinator,
+    BirdfyMomentsCoordinator,
+    BirdfyRecapCoordinator,
+)
+from .entity_data import moments_sensor_attributes, moments_sensor_value
 
 
 SENSOR_DESCRIPTIONS = [
@@ -105,6 +110,35 @@ RECAP_SENSOR_DESCRIPTIONS = [
     ),
 ]
 
+MOMENTS_SENSOR_DESCRIPTIONS = [
+    SensorEntityDescription(
+        key="total_moments",
+        name="Moments Today",
+        icon="mdi:motion-sensor",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="events",
+    ),
+    SensorEntityDescription(
+        key="bird_visits",
+        name="Bird Visits Today",
+        icon="mdi:bird",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="visits",
+    ),
+    SensorEntityDescription(
+        key="species_count",
+        name="Moment Species Today",
+        icon="mdi:bird",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="species",
+    ),
+    SensorEntityDescription(
+        key="last_species",
+        name="Last Moment Species",
+        icon="mdi:bird",
+    ),
+]
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -115,6 +149,10 @@ async def async_setup_entry(
     """Set up Birdfy sensors."""
     coordinators = hass.data[DOMAIN][entry.entry_id]["coordinators"]
     recap_coordinator = hass.data[DOMAIN][entry.entry_id].get("recap_coordinator")
+    moments_coordinators = hass.data[DOMAIN][entry.entry_id].get(
+        "moments_coordinators",
+        {},
+    )
 
     entities = []
 
@@ -150,6 +188,9 @@ async def async_setup_entry(
         # Add recap sensors if recap coordinator exists (only on initial setup)
         if recap_coordinator:
             entities.extend(_create_recap_sensors(recap_coordinator, entry))
+
+        for coordinator in moments_coordinators.values():
+            entities.extend(_create_moments_sensors(coordinator))
 
     async_add_entities(entities)
 
@@ -376,6 +417,61 @@ def _create_recap_sensors(
     entities.append(BirdfyRecapSummarySensor(coordinator, entry))
 
     return entities
+
+
+def _create_moments_sensors(
+    coordinator: BirdfyMomentsCoordinator,
+) -> list[SensorEntity]:
+    """Create compact Moments sensors for one feeder."""
+    return [
+        BirdfyMomentsSensor(coordinator, description)
+        for description in MOMENTS_SENSOR_DESCRIPTIONS
+    ]
+
+
+class BirdfyMomentsSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a Birdfy Moments sensor."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: BirdfyMomentsCoordinator,
+        description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self.entity_description = description
+        fetcher = coordinator.fetcher
+        self._attr_unique_id = (
+            f"{fetcher.serial_number}_moments_{description.key}"
+        )
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, fetcher.serial_number)},
+            "name": fetcher.device_name,
+            "manufacturer": "Birdfy",
+            "model": fetcher.device_model,
+        }
+
+    @property
+    def native_value(self) -> Any:
+        """Return the state of the sensor."""
+        if self.coordinator.data is None:
+            return None
+        return moments_sensor_value(
+            self.coordinator.data,
+            self.entity_description.key,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return bounded attributes that are safe for Recorder."""
+        if self.coordinator.data is None:
+            return {}
+        return moments_sensor_attributes(
+            self.coordinator.data,
+            self.entity_description.key,
+        )
 
 
 class BirdfyRecapSensor(CoordinatorEntity, SensorEntity):
