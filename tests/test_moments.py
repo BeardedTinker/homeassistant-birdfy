@@ -172,6 +172,23 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["collected_count"], 1)
         self.assertEqual(snapshot["species_counts"], {"Robin": 4})
 
+    def test_snapshot_never_undercounts_visible_events(self) -> None:
+        """Reconcile lagging statistics with events already in the feed."""
+        snapshot = moments.build_moments_snapshot(
+            [
+                {
+                    "alarmId": "new",
+                    "alertTime": 100,
+                    "aiLabels": ["Robin"],
+                }
+            ],
+            total_count=0,
+            raw_tag_counts=[{"tag": "allbird", "count": 0}],
+        )
+
+        self.assertEqual(snapshot["total_moments"], 1)
+        self.assertEqual(snapshot["bird_visits"], 1)
+
 
 class NewMomentTrackerTest(unittest.TestCase):
     """Test notification event de-duplication."""

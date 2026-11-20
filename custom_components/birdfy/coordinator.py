@@ -1,6 +1,6 @@
 """DataUpdateCoordinator for Birdfy."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,7 +14,15 @@ from .api import (
     BirdfyRecapApiError,
     get_date_range_timestamps,
 )
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, RECAP_SCAN_INTERVAL, DEFAULT_DATE_RANGE
+from .const import (
+    DEFAULT_DATE_RANGE,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    EVENT_NEW_MOMENT,
+    MOMENTS_SCAN_INTERVAL,
+    RECAP_SCAN_INTERVAL,
+)
+from .moments_fetcher import BirdfyMomentsFetcher, MomentsFeedError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -161,3 +169,59 @@ class BirdfyRecapCoordinator(DataUpdateCoordinator):
 
         except BirdfyRecapApiError as err:
             raise UpdateFailed(f"Error fetching recap data: {err}")
+
+
+class BirdfyMomentsCoordinator(DataUpdateCoordinator):
+    """Poll one Birdfy feeder's authenticated Moments feed."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        fetcher: BirdfyMomentsFetcher,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_moments_{fetcher.serial_number}",
+            update_interval=timedelta(minutes=MOMENTS_SCAN_INTERVAL),
+        )
+        self.fetcher = fetcher
+        self.entry = entry
+
+    async def _async_update_data(self) -> dict:
+        """Fetch Moments and emit one event per new arrival."""
+        try:
+            data = await self.fetcher.async_fetch()
+        except MomentsFeedError as err:
+            raise UpdateFailed("Unable to update Birdfy Moments") from err
+
+        if data["partial_failures"]:
+            _LOGGER.debug(
+                "Birdfy Moments update has partial failures: %s",
+                ", ".join(data["partial_failures"]),
+            )
+
+        for moment in data["new_moments"]:
+            timestamp = moment.get("time")
+            detection_time = (
+                datetime.fromtimestamp(timestamp / 1000, tz=UTC).isoformat()
+                if timestamp
+                else None
+            )
+            self.hass.bus.async_fire(
+                EVENT_NEW_MOMENT,
+                {
+                    "serial_number": self.fetcher.serial_number,
+                    "device_name": self.fetcher.device_name,
+                    "alarm_id": moment.get("alarm_id"),
+                    "species": moment.get("species"),
+                    "ai_labels": moment.get("ai_labels", []),
+                    "detection_time": detection_time,
+                    "video_url": moment.get("video_url"),
+                    "image_url": moment.get("image_url"),
+                },
+            )
+
+        return data

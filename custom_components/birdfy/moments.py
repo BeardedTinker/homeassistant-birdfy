@@ -200,7 +200,7 @@ def extract_event_labels(
     return mask_labels
 
 
-def _event_timestamp(event: Mapping[str, Any]) -> int:
+def moment_timestamp(event: Mapping[str, Any]) -> int:
     """Return a normalized Moment timestamp."""
     value = event.get("alertTime") or event.get("alertTimeTs") or 0
     try:
@@ -209,7 +209,7 @@ def _event_timestamp(event: Mapping[str, Any]) -> int:
         return 0
 
 
-def _event_id(event: Mapping[str, Any]) -> str | None:
+def moment_id(event: Mapping[str, Any]) -> str | None:
     """Return a stable Moment identifier."""
     alarm_id = event.get("alarmId")
     if alarm_id in (None, ""):
@@ -246,7 +246,7 @@ def build_moments_snapshot(
     media = media_by_alarm or {}
     ordered_events = sorted(
         (event for event in raw_events if isinstance(event, Mapping)),
-        key=_event_timestamp,
+        key=moment_timestamp,
         reverse=True,
     )
 
@@ -271,7 +271,7 @@ def build_moments_snapshot(
         moments.append(
             {
                 "alarm_id": alarm_id,
-                "time": _event_timestamp(event),
+                "time": moment_timestamp(event),
                 "species": labels[0] if labels else "Motion",
                 "ai_labels": labels,
                 "video_url": video_url,
@@ -328,19 +328,25 @@ def build_moments_snapshot(
     )
     if total_count is None:
         total_count = len(moments)
-    if bird_visits is None:
-        if sorted_species_counts:
-            bird_visits = sum(sorted_species_counts.values())
-        else:
-            bird_visits = sum(
-                1
-                for moment in moments
-                if any(
-                    label.lower() == "bird"
-                    or label.lower() not in GENERIC_AI_LABELS
-                    for label in moment["ai_labels"]
-                )
+    else:
+        total_count = max(total_count, len(moments))
+    observed_bird_visits = (
+        sum(sorted_species_counts.values())
+        if sorted_species_counts
+        else sum(
+            1
+            for moment in moments
+            if any(
+                label.lower() == "bird"
+                or label.lower() not in GENERIC_AI_LABELS
+                for label in moment["ai_labels"]
             )
+        )
+    )
+    if bird_visits is None:
+        bird_visits = observed_bird_visits
+    else:
+        bird_visits = max(bird_visits, observed_bird_visits)
 
     last_moment = moments[0] if moments else None
     return {
@@ -376,15 +382,15 @@ class NewMomentTracker:
     ) -> list[Mapping[str, Any]]:
         """Record a feed update and return new events oldest first."""
         ordered = sorted(
-            (event for event in events if _event_id(event) is not None),
-            key=_event_timestamp,
+            (event for event in events if moment_id(event) is not None),
+            key=moment_timestamp,
             reverse=True,
         )
         if not self._initialized:
             for event in ordered:
-                self._remember(_event_id(event))
+                self._remember(moment_id(event))
             self._high_watermark = max(
-                (_event_timestamp(event) for event in ordered),
+                (moment_timestamp(event) for event in ordered),
                 default=0,
             )
             self._initialized = True
@@ -393,17 +399,17 @@ class NewMomentTracker:
         new_events = [
             event
             for event in ordered
-            if _event_id(event) not in self._seen_ids
-            and _event_timestamp(event) >= self._high_watermark
+            if moment_id(event) not in self._seen_ids
+            and moment_timestamp(event) >= self._high_watermark
         ]
         for event in ordered:
-            self._remember(_event_id(event))
+            self._remember(moment_id(event))
         newest_timestamp = max(
-            (_event_timestamp(event) for event in ordered),
+            (moment_timestamp(event) for event in ordered),
             default=self._high_watermark,
         )
         self._high_watermark = max(self._high_watermark, newest_timestamp)
-        return sorted(new_events, key=_event_timestamp)
+        return sorted(new_events, key=moment_timestamp)
 
     def _remember(self, event_id: str | None) -> None:
         """Remember one ID while keeping the set and deque bounded."""

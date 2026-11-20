@@ -22,7 +22,10 @@ MOMENTS_BASE_URL_TEMPLATE = "https://{region}-api2.netvue.co/"
 
 # Update interval in minutes
 DEFAULT_SCAN_INTERVAL = 15
+MOMENTS_SCAN_INTERVAL = 5
 RECAP_SCAN_INTERVAL = 60  # Recap data changes less frequently
+
+EVENT_NEW_MOMENT = f"{DOMAIN}_new_moment"
 
 # Date range options
 DATE_RANGE_TODAY = "today"
