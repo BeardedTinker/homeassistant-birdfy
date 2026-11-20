@@ -34,6 +34,13 @@ RECAP_SCAN_INTERVAL = 60  # Recap data changes less frequently
 
 EVENT_NEW_MOMENT = f"{DOMAIN}_new_moment"
 
+SERVICE_GET_MOMENTS = "get_moments"
+ATTR_DEVICE_ID = "device_id"
+ATTR_LIMIT = "limit"
+CARD_DEFAULT_LIMIT = 20
+CARD_MAX_LIMIT = 20
+CARD_CACHE_TTL = 60
+
 # Date range options
 DATE_RANGE_TODAY = "today"
 DATE_RANGE_YESTERDAY = "yesterday"

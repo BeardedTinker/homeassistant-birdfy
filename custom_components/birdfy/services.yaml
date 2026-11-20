@@ -1,0 +1,20 @@
+get_moments:
+  name: Get moments
+  description: Returns a bounded recent Moments feed for the bundled Birdfy card.
+  fields:
+    device_id:
+      name: Birdfy feeder
+      description: Birdfy feeder device to query.
+      required: true
+      selector:
+        device:
+          integration: birdfy
+    limit:
+      name: Limit
+      description: Maximum number of recent Moments to return.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
