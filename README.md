@@ -1,125 +1,150 @@
 # Birdfy for Home Assistant
 
-A Home Assistant integration that exposes bird species data from your Birdfy feeder camera.
+An unofficial Home Assistant integration for Birdfy feeder cameras. It supports
+authenticated Moments, legacy Highlight/Recap share links, new-arrival events,
+compact entities, and a bundled Lovelace card.
 
 ## Features
 
-- **Bird Species Count**: Number of unique species observed today
-- **Last Bird Species**: Most recently detected bird species
-- **New Species Today**: Count of first-time visitors
-- **Bird Species List**: Complete list of all species with thumbnails and video links
+- Discovers recognized Birdfy feeders from a Birdfy account.
+- Polls each feeder's Moments feed every five minutes.
+- Fires `birdfy_new_moment` once for each newly detected arrival.
+- Exposes compact daily counters, the latest species, and the latest image.
+- Bundles an English/Croatian Moments card with image and video playback.
+- Retains Highlight and monthly Recap support through optional share UUIDs.
+
+The full feed and temporary signed media URLs are not stored in sensor
+attributes. The card requests at most 20 Moments when it is opened and caches
+the response in memory for 60 seconds.
 
 ## Installation
 
-### HACS (Recommended)
+### HACS
 
-1. Open HACS in Home Assistant
-2. Click on "Integrations"
-3. Click the three dots in the top right corner
-4. Select "Custom repositories"
-5. Add this repository URL and select "Integration" as the category
-6. Click "Add"
-7. Search for "Birdfy" and install it
-8. Restart Home Assistant
+1. In HACS, open **Integrations**.
+2. Add `https://github.com/BeardedTinker/homeassistant-birdfy` as a custom
+   **Integration** repository.
+3. Install **Birdfy**.
+4. Restart Home Assistant.
+5. Add the integration under **Settings > Devices & services**.
 
-### Manual Installation
+### Manual
 
-1. Copy the `custom_components/birdfy` folder to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
+Copy `custom_components/birdfy` into Home Assistant's `custom_components`
+directory, restart Home Assistant, and add the integration from the UI.
 
 ## Configuration
 
-1. Go to Settings > Devices & Services
-2. Click "Add Integration"
-3. Search for "Birdfy"
-4. Enter your Highlight UUID
+At least one of these configuration methods is required:
 
-### Finding Your UUID
+- **Birdfy account email and password** enable authenticated Moments, feeder
+  discovery, new-arrival events, compact Moments entities, and the card.
+- **Highlight UUID** enables the legacy shared Highlights sensors.
+- **Recap UUID** enables the legacy monthly Recap sensors.
 
-Both UUIDs are obtained from share links in the Birdfy mobile app. The UUID is always the value after `uuid=` in the URL that opens.
+The account password is converted to the digest required by Birdfy before it is
+stored. Renewable authentication tokens are refreshed and persisted by the
+integration.
 
-#### Highlight UUID (required)
+### Finding share UUIDs
 
-1. Open the Birdfy app
-2. Tap your profile image in the top right corner
-3. Select **Highlights**
-4. A browser tab opens — copy its URL
-5. The UUID is the value after `uuid=`:
+Open **Highlights** or **Recap** in the Birdfy app and copy the value after
+`uuid=` from the generated share URL:
 
-   ```
-   https://highlight.birdfy.com/?uuid=YOUR_UUID_HERE
-   ```
-
-#### Recap UUID (optional)
-
-The steps are identical to the Highlight UUID, except you select **Recap** in the app instead of Highlights:
-
-1. Open the Birdfy app
-2. Tap your profile image in the top right corner
-3. Select **Recap**
-4. A browser tab opens — copy its URL
-5. The UUID is the value after `uuid=`:
-
-   ```
-   https://recap.birdfy.com/?uuid=YOUR_UUID_HERE
-   ```
-
-## Sensors
-
-This integration creates the following sensors:
-
-| Sensor | Description | Attributes |
-|--------|-------------|------------|
-| `sensor.birdfy_bird_species_count` | Number of species today | `species_list`, `thumbnails` |
-| `sensor.birdfy_last_bird_species` | Last detected species | `title`, `category`, `video_url`, `detection_time` |
-| `sensor.birdfy_new_species_today` | Count of new species | `new_species` |
-| `sensor.birdfy_bird_species_today` | Comma-separated species list | All data including highlights |
-
-## Example Automations
-
-### Notify on New Bird Species
-
-```yaml
-automation:
-  - alias: "New Bird Species Alert"
-    trigger:
-      - platform: state
-        entity_id: sensor.birdfy_new_species_today
-    condition:
-      - condition: template
-        value_template: "{{ trigger.to_state.state | int > trigger.from_state.state | int }}"
-    action:
-      - service: notify.mobile_app
-        data:
-          title: "New Bird Visitor!"
-          message: "A new species was spotted: {{ state_attr('sensor.birdfy_last_bird_species', 'title') }}"
+```text
+https://highlight.birdfy.com/?uuid=YOUR_UUID
+https://recap.birdfy.com/?uuid=YOUR_UUID
 ```
 
-### Daily Bird Summary
+Account login and share UUIDs can be used together.
+
+## Moments entities
+
+Each authenticated feeder creates:
+
+- **Moments Today**
+- **Bird Visits Today**
+- **Moment Species Today**
+- **Last Moment Species**
+- **Last Moment** image
+
+Entity attributes contain only bounded metadata. The latest image is served
+through Home Assistant's image proxy.
+
+## Bundled dashboard card
+
+The integration registers `custom:birdfy-moments-card` automatically when
+Lovelace uses storage-managed resources. Add it with the visual card editor and
+select a Birdfy feeder.
+
+Example YAML:
 
 ```yaml
-automation:
-  - alias: "Daily Bird Summary"
-    trigger:
-      - platform: time
-        at: "20:00:00"
-    action:
-      - service: notify.mobile_app
-        data:
-          title: "Today's Bird Report"
-          message: >
-            {{ states('sensor.birdfy_bird_species_count') }} species visited today:
-            {{ states('sensor.birdfy_bird_species_today') }}
+type: custom:birdfy-moments-card
+device_id: YOUR_HOME_ASSISTANT_DEVICE_ID
+title: Garden Birdfy
+limit: 20
 ```
 
-## Data Update
+For YAML-managed Lovelace resources, add this module manually:
 
-The integration polls the Birdfy API every 15 minutes by default.
+```yaml
+url: /birdfy/birdfy-moments-card.js?v=1.2.0
+type: module
+```
+
+The card requests feed and media data only when the modal is opened. It does not
+use entity-state feed attributes, `localStorage`, or `sessionStorage`.
+
+## New Moment event
+
+The integration fires `birdfy_new_moment` with:
+
+- `serial_number`
+- `device_name`
+- `alarm_id`
+- `species`
+- `ai_labels`
+- `detection_time`
+- `image_url`
+- `video_url`
+
+Example notification automation:
+
+```yaml
+alias: Birdfy - Notify on new Moment
+triggers:
+  - trigger: event
+    event_type: birdfy_new_moment
+actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: "Birdfy: {{ trigger.event.data.species }}"
+      message: >
+        New Moment at {{ trigger.event.data.device_name }}
+        ({{ trigger.event.data.detection_time }}).
+      data:
+        image: "{{ trigger.event.data.image_url }}"
+mode: queued
+max: 10
+```
+
+Media URLs in the event are temporary Birdfy URLs intended for immediate
+automation use.
+
+## Update intervals
+
+- Authenticated Moments: 5 minutes
+- Shared Highlights: 15 minutes
+- Monthly Recap: 60 minutes
 
 ## Support
 
-For issues and feature requests, please open an issue on GitHub.
+Report issues at
+<https://github.com/BeardedTinker/homeassistant-birdfy/issues>.
+
+This project is unofficial and is not affiliated with Birdfy or Netvue.
 
 ## License
 
-MIT License
+MIT

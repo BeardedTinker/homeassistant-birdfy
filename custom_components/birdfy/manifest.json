@@ -1,12 +1,12 @@
 {
   "domain": "birdfy",
   "name": "Birdfy",
-  "codeowners": [],
+  "codeowners": ["@BeardedTinker"],
   "config_flow": true,
   "dependencies": ["http", "lovelace"],
-  "documentation": "https://github.com/dakahler/homeassistant-birdfy",
+  "documentation": "https://github.com/BeardedTinker/homeassistant-birdfy",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/dakahler/homeassistant-birdfy/issues",
+  "issue_tracker": "https://github.com/BeardedTinker/homeassistant-birdfy/issues",
   "requirements": [],
-  "version": "1.1.0"
+  "version": "1.2.0"
 }
