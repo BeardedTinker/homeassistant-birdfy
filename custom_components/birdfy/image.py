@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 import logging
 
 import aiohttp
@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import BirdfyHighlightsCoordinator
+from .media import highlight_timestamp, image_url_for_highlights, latest_highlight
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class BirdfyLastBirdImage(CoordinatorEntity, ImageEntity):
         self._subentry_name = subentry_name
         self._last_url: str | None = None
         self._cached_image: bytes | None = None
-        self._attr_image_last_updated = datetime.now()
+        self._attr_image_last_updated = datetime.now(UTC)
 
         # Set name based on subentry
         if subentry_name:
@@ -114,77 +115,36 @@ class BirdfyLastBirdImage(CoordinatorEntity, ImageEntity):
     def _get_image_url(self) -> str | None:
         """Get the current image URL from coordinator data."""
         if self.coordinator.data is None:
-            _LOGGER.debug("No coordinator data available")
-            return None
-
-        thumbnails = self.coordinator.data.get("thumbnails", {})
-        _LOGGER.debug("Available thumbnails: %s", list(thumbnails.keys()))
-
-        if not thumbnails:
-            _LOGGER.debug("No thumbnails available")
             return None
 
         highlights = self.coordinator.data.get("highlights", [])
-
-        # Try to get thumbnail for the most recent highlight species
-        if highlights:
-            last_highlight = highlights[0]
-            species = last_highlight.get("species")
-            _LOGGER.debug("Last highlight species: %s", species)
-
-            if species and species in thumbnails:
-                url = thumbnails[species]
-                _LOGGER.debug("Thumbnail URL for %s: %s", species, url)
-                return url
-            else:
-                _LOGGER.debug("Species '%s' not in thumbnails, checking highlights for match", species)
-
-            # Try to find a highlight species that has a thumbnail
-            for highlight in highlights:
-                h_species = highlight.get("species")
-                if h_species and h_species in thumbnails:
-                    url = thumbnails[h_species]
-                    _LOGGER.debug("Found thumbnail for highlight species %s: %s", h_species, url)
-                    return url
-
-        # Fallback: use first available thumbnail
-        if thumbnails:
-            first_species = next(iter(thumbnails))
-            url = thumbnails[first_species]
-            _LOGGER.debug("Fallback to first thumbnail (%s): %s", first_species, url)
-            return url
-
-        return None
+        thumbnails = self.coordinator.data.get("thumbnails", {})
+        return image_url_for_highlights(highlights, thumbnails)
 
     async def async_image(self) -> bytes | None:
         """Return bytes of image."""
         url = self._get_image_url()
-        _LOGGER.debug("async_image called, URL: %s", url)
 
         if url is None:
-            _LOGGER.debug("No image URL available")
             return None
 
         # Return cached image if URL hasn't changed
         if url == self._last_url and self._cached_image is not None:
-            _LOGGER.debug("Returning cached image")
             return self._cached_image
 
         # Fetch new image
-        _LOGGER.debug("Fetching new image from: %s", url)
         try:
             session = async_get_clientsession(self.hass)
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                _LOGGER.debug("Image fetch response status: %s", response.status)
                 if response.status == 200:
+                    if response.content_type.startswith("image/"):
+                        self._attr_content_type = response.content_type
                     self._cached_image = await response.read()
                     self._last_url = url
-                    _LOGGER.debug("Successfully fetched image, size: %d bytes", len(self._cached_image))
                     return self._cached_image
-                else:
-                    _LOGGER.warning("Failed to fetch image, status: %s", response.status)
-        except Exception as err:
-            _LOGGER.exception("Error fetching image: %s", err)
+                _LOGGER.warning("Failed to fetch Birdfy image: HTTP %s", response.status)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.warning("Failed to fetch Birdfy image: %s", err)
 
         return self._cached_image
 
@@ -194,9 +154,8 @@ class BirdfyLastBirdImage(CoordinatorEntity, ImageEntity):
         # Check if image URL changed to update the timestamp
         new_url = self._get_image_url()
         if new_url != self._last_url:
-            _LOGGER.debug("Image URL changed from %s to %s", self._last_url, new_url)
             self._cached_image = None  # Clear cache
-            self._attr_image_last_updated = datetime.now()
+            self._attr_image_last_updated = datetime.now(UTC)
 
         super()._handle_coordinator_update()
 
@@ -210,7 +169,10 @@ class BirdfyLastBirdImage(CoordinatorEntity, ImageEntity):
         if not highlights:
             return {}
 
-        last = highlights[0]
+        last = latest_highlight(highlights)
+        if last is None:
+            return {}
+
         attrs = {
             "species": last.get("species"),
             "title": last.get("title"),
@@ -218,9 +180,9 @@ class BirdfyLastBirdImage(CoordinatorEntity, ImageEntity):
             "image_url": self._get_image_url(),
         }
 
-        if last.get("time"):
+        if timestamp := highlight_timestamp(last):
             attrs["detection_time"] = datetime.fromtimestamp(
-                last["time"] / 1000
+                timestamp / 1000, tz=UTC
             ).isoformat()
 
         if last.get("video_url"):
