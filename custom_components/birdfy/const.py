@@ -13,6 +13,10 @@ SUBENTRY_TYPE_DATE_RANGE = "date_range"
 API_URL = "https://api2.nvts.co/moments/h5CuratedData"
 RECAP_API_URL = "https://api2.nvts.co/moments/community/recapData"
 
+# Reverse-engineered Netvue/Birdfy account API.
+AUTH_BASE_URL = "https://localweb.netvue.co/v1/"
+DEFAULT_UCID = "513774810c"
+
 # Update interval in minutes
 DEFAULT_SCAN_INTERVAL = 15
 RECAP_SCAN_INTERVAL = 60  # Recap data changes less frequently
