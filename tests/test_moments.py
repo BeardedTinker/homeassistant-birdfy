@@ -118,5 +118,133 @@ class LabelExtractionTest(unittest.TestCase):
         )
 
 
+class SnapshotTest(unittest.TestCase):
+    """Test normalized coordinator snapshots."""
+
+    def test_snapshot_sorts_events_and_uses_latest_media(self) -> None:
+        """Build a stable newest-first snapshot from unordered API data."""
+        snapshot = moments.build_moments_snapshot(
+            [
+                {
+                    "alarmId": 1,
+                    "alertTime": 100,
+                    "aiLabels": ["Robin"],
+                },
+                {
+                    "alarmId": 2,
+                    "alertTimeTs": "200",
+                    "aiLabels": ["Bird", "Blue Tit"],
+                },
+            ],
+            media_by_alarm={
+                "2": {
+                    "videos": ["https://example.test/latest.mp4"],
+                    "images": ["https://example.test/latest.jpg"],
+                }
+            },
+        )
+
+        self.assertEqual(snapshot["last_moment"]["alarm_id"], 2)
+        self.assertEqual(snapshot["last_moment"]["species"], "Blue Tit")
+        self.assertEqual(
+            snapshot["last_moment"]["image_url"],
+            "https://example.test/latest.jpg",
+        )
+        self.assertEqual(snapshot["species_list"], ["Blue Tit", "Robin"])
+
+    def test_snapshot_prefers_statistics_and_filters_invalid_counts(self) -> None:
+        """Use statistics while tolerating malformed category values."""
+        snapshot = moments.build_moments_snapshot(
+            [],
+            raw_tag_counts=[
+                {"tag": "all", "count": "12"},
+                {"tag": "allbird", "count": 7},
+                {"tag": "allanimal", "count": 2},
+                {"tag": "collected", "count": 1},
+                {"tag": "Robin", "count": 4},
+                {"tag": "Broken", "count": "invalid"},
+            ],
+        )
+
+        self.assertEqual(snapshot["total_moments"], 12)
+        self.assertEqual(snapshot["bird_visits"], 7)
+        self.assertEqual(snapshot["animal_visits"], 2)
+        self.assertEqual(snapshot["collected_count"], 1)
+        self.assertEqual(snapshot["species_counts"], {"Robin": 4})
+
+
+class NewMomentTrackerTest(unittest.TestCase):
+    """Test notification event de-duplication."""
+
+    def test_initial_feed_is_seeded_without_notifications(self) -> None:
+        """Never replay old events when Home Assistant starts."""
+        tracker = moments.NewMomentTracker()
+
+        new_events = tracker.update(
+            [
+                {"alarmId": "two", "alertTime": 200},
+                {"alarmId": "one", "alertTime": 100},
+            ]
+        )
+
+        self.assertEqual(new_events, [])
+
+    def test_multiple_new_events_are_returned_oldest_first(self) -> None:
+        """Return every new arrival between polls in notification order."""
+        tracker = moments.NewMomentTracker()
+        tracker.update([{"alarmId": "one", "alertTime": 100}])
+
+        new_events = tracker.update(
+            [
+                {"alarmId": "three", "alertTime": 300},
+                {"alarmId": "two", "alertTime": 200},
+                {"alarmId": "one", "alertTime": 100},
+            ]
+        )
+
+        self.assertEqual(
+            [event["alarmId"] for event in new_events],
+            ["two", "three"],
+        )
+
+    def test_reordering_does_not_duplicate_events(self) -> None:
+        """Ignore already-seen IDs if API ordering changes."""
+        tracker = moments.NewMomentTracker()
+        tracker.update([{"alarmId": "one", "alertTime": 100}])
+        tracker.update([{"alarmId": "two", "alertTime": 200}])
+
+        self.assertEqual(
+            tracker.update(
+                [
+                    {"alarmId": "one", "alertTime": 100},
+                    {"alarmId": "two", "alertTime": 200},
+                ]
+            ),
+            [],
+        )
+
+    def test_delayed_older_event_is_not_reported(self) -> None:
+        """Do not notify on an old event newly inserted into the feed."""
+        tracker = moments.NewMomentTracker()
+        tracker.update([{"alarmId": "current", "alertTime": 200}])
+
+        self.assertEqual(
+            tracker.update(
+                [
+                    {"alarmId": "current", "alertTime": 200},
+                    {"alarmId": "old", "alertTime": 100},
+                ]
+            ),
+            [],
+        )
+
+    def test_empty_feed_after_initialization_is_safe(self) -> None:
+        """Tolerate temporary empty API responses."""
+        tracker = moments.NewMomentTracker()
+        tracker.update([{"alarmId": "current", "alertTime": 200}])
+
+        self.assertEqual(tracker.update([]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
