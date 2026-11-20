@@ -12,7 +12,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-CARD_VERSION = "1.2.0"
+CARD_VERSION = "1.2.1"
 CARD_URL_PATH = "/birdfy/birdfy-moments-card.js"
 _REGISTERED = f"{DOMAIN}_frontend_registered"
 

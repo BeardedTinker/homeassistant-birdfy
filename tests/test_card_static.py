@@ -35,11 +35,25 @@ class CardStaticTest(unittest.TestCase):
         self.assertIn("Birdfy trenuci", self.source)
 
     def test_card_keeps_feed_in_memory_only(self) -> None:
-        """Avoid state attributes and browser persistence."""
-        self.assertNotIn(".states", self.source)
+        """Allow compact summaries but avoid feed persistence."""
         self.assertNotIn("localStorage", self.source)
         self.assertNotIn("sessionStorage", self.source)
         self.assertIn("CACHE_TTL_MS = 60_000", self.source)
+
+    def test_closed_card_uses_only_compact_summary_entities(self) -> None:
+        """Render summary states without requesting the Moments feed."""
+        for config_key in (
+            "moments_entity",
+            "visits_entity",
+            "species_count_entity",
+            "latest_species_entity",
+            "latest_image_entity",
+        ):
+            self.assertIn(config_key, self.source)
+        self.assertIn("this.#hass?.states?.[entityId]", self.source)
+        self.assertIn("attributes?.entity_picture", self.source)
+        self.assertNotIn("attributes?.image_url", self.source)
+        self.assertNotIn("attributes?.video_url", self.source)
 
     def test_card_avoids_dynamic_code_execution(self) -> None:
         """Do not introduce eval-style script execution."""

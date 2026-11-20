@@ -1,7 +1,7 @@
 // Bundled Birdfy card. Moments and temporary media URLs are requested only
 // when the user opens the feed and remain in this card instance's memory.
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.2.1";
 const CACHE_TTL_MS = 60_000;
 
 const I18N = {
@@ -29,6 +29,11 @@ const I18N = {
     f_device_id: "Birdfy feeder",
     f_title: "Title",
     f_limit: "Maximum Moments",
+    f_moments_entity: "Moments Today entity",
+    f_visits_entity: "Bird Visits Today entity",
+    f_species_count_entity: "Species Today entity",
+    f_latest_species_entity: "Last Moment Species entity",
+    f_latest_image_entity: "Last Moment image entity",
     today: "Today",
   },
   hr: {
@@ -55,6 +60,11 @@ const I18N = {
     f_device_id: "Birdfy hranilica",
     f_title: "Naslov",
     f_limit: "Najveći broj trenutaka",
+    f_moments_entity: "Entitet današnjih trenutaka",
+    f_visits_entity: "Entitet današnjih dolazaka ptica",
+    f_species_count_entity: "Entitet današnjih vrsta",
+    f_latest_species_entity: "Entitet vrste posljednjeg trenutka",
+    f_latest_image_entity: "Entitet slike posljednjeg trenutka",
     today: "Danas",
   },
 };
@@ -150,6 +160,11 @@ class BirdfyMomentsCard extends HTMLElement {
           name: "limit",
           selector: { number: { min: 1, max: 20, mode: "box" } },
         },
+        { name: "moments_entity", selector: { entity: {} } },
+        { name: "visits_entity", selector: { entity: {} } },
+        { name: "species_count_entity", selector: { entity: {} } },
+        { name: "latest_species_entity", selector: { entity: {} } },
+        { name: "latest_image_entity", selector: { entity: {} } },
       ],
       computeLabel: (schema) => translations[`f_${schema.name}`],
     };
@@ -166,7 +181,8 @@ class BirdfyMomentsCard extends HTMLElement {
 
   #formatTime(epochMs) {
     if (!epochMs) return "";
-    const dt = new Date(Number(epochMs));
+    const numeric = Number(epochMs);
+    const dt = new Date(Number.isFinite(numeric) ? numeric : epochMs);
     if (Number.isNaN(dt.getTime())) return "";
     const now = new Date();
     const isToday = dt.toDateString() === now.toDateString();
@@ -182,6 +198,18 @@ class BirdfyMomentsCard extends HTMLElement {
       day: "numeric",
     });
     return `${dateStr}, ${timeStr}`;
+  }
+
+  #getSummaryEntity(configKey) {
+    const entityId = this.#config[configKey];
+    return entityId ? this.#hass?.states?.[entityId] || null : null;
+  }
+
+  #getSummaryValue(configKey, fallback = null) {
+    const state = this.#getSummaryEntity(configKey)?.state;
+    return state && !["unknown", "unavailable"].includes(state)
+      ? state
+      : fallback;
   }
 
   #getFilteredMoments(moments) {
@@ -757,6 +785,15 @@ class BirdfyMomentsCard extends HTMLElement {
       ? this.#feed.moments
       : [];
     const latest = moments[0] || null;
+    const summarySpeciesEntity = this.#getSummaryEntity(
+      "latest_species_entity"
+    );
+    const summaryImageEntity = this.#getSummaryEntity("latest_image_entity");
+    const summarySpecies = this.#getSummaryValue("latest_species_entity");
+    const summaryTime =
+      summarySpeciesEntity?.attributes?.detection_time ||
+      summaryImageEntity?.attributes?.detection_time ||
+      summaryImageEntity?.state;
 
     if (speciesEl) {
       speciesEl.textContent = !this.#config.device_id
@@ -765,13 +802,16 @@ class BirdfyMomentsCard extends HTMLElement {
           ? this.#t.loading
           : this.#error && !this.#feed
             ? this.#t.failed
-            : latest?.species || (this.#feed ? this.#t.empty : this.#t.open);
+            : latest?.species ||
+              summarySpecies ||
+              (this.#feed ? this.#t.empty : this.#t.open);
     }
     if (timeEl) {
-      timeEl.textContent = latest?.time ? this.#formatTime(latest.time) : "";
+      timeEl.textContent = this.#formatTime(latest?.time || summaryTime);
     }
 
-    const imgUrl = latest?.image_url || "";
+    const imgUrl =
+      latest?.image_url || summaryImageEntity?.attributes?.entity_picture || "";
     if (heroImg && imgUrl && heroImg.getAttribute("src") !== imgUrl) {
       heroImg.setAttribute("src", imgUrl);
     } else if (heroImg && !imgUrl) {
@@ -780,14 +820,21 @@ class BirdfyMomentsCard extends HTMLElement {
 
     if (statMoments) {
       statMoments.textContent = String(
-        this.#feed?.total_moments ?? moments.length
+        this.#feed?.total_moments ??
+          this.#getSummaryValue("moments_entity", moments.length)
       );
     }
     if (statVisits) {
-      statVisits.textContent = String(this.#feed?.bird_visits ?? 0);
+      statVisits.textContent = String(
+        this.#feed?.bird_visits ??
+          this.#getSummaryValue("visits_entity", 0)
+      );
     }
     if (statSpecies) {
-      statSpecies.textContent = String(this.#feed?.species_count ?? 0);
+      statSpecies.textContent = String(
+        this.#feed?.species_count ??
+          this.#getSummaryValue("species_count_entity", 0)
+      );
     }
 
     const dialog = this.shadowRoot.querySelector("#moments-dialog");

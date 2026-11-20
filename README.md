@@ -84,17 +84,24 @@ type: custom:birdfy-moments-card
 device_id: YOUR_HOME_ASSISTANT_DEVICE_ID
 title: Garden Birdfy
 limit: 20
+moments_entity: sensor.garden_birdfy_moments_today
+visits_entity: sensor.garden_birdfy_bird_visits_today
+species_count_entity: sensor.garden_birdfy_moment_species_today
+latest_species_entity: sensor.garden_birdfy_last_moment_species
+latest_image_entity: image.garden_birdfy_last_moment
 ```
 
 For YAML-managed Lovelace resources, add this module manually:
 
 ```yaml
-url: /birdfy/birdfy-moments-card.js?v=1.2.0
+url: /birdfy/birdfy-moments-card.js?v=1.2.1
 type: module
 ```
 
-The card requests feed and media data only when the modal is opened. It does not
-use entity-state feed attributes, `localStorage`, or `sessionStorage`.
+The optional summary entities let the closed card show current counts, species,
+and the Home Assistant image-proxy URL. The card requests the full feed and
+temporary Birdfy media URLs only when the modal is opened. It does not use
+entity-state feed attributes, `localStorage`, or `sessionStorage`.
 
 ## New Moment event
 
