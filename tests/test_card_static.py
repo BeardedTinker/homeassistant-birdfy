@@ -51,7 +51,9 @@ class CardStaticTest(unittest.TestCase):
         ):
             self.assertIn(config_key, self.source)
         self.assertIn("this.#hass?.states?.[entityId]", self.source)
-        self.assertIn("attributes?.entity_picture", self.source)
+        self.assertIn("attributes.entity_picture", self.source)
+        self.assertIn("attributes?.detection_time", self.source)
+        self.assertNotIn("summaryImageEntity?.state", self.source)
         self.assertNotIn("attributes?.image_url", self.source)
         self.assertNotIn("attributes?.video_url", self.source)
 

@@ -1,7 +1,7 @@
 // Bundled Birdfy card. Moments and temporary media URLs are requested only
 // when the user opens the feed and remain in this card instance's memory.
 
-const CARD_VERSION = "1.2.1";
+const CARD_VERSION = "1.2.2";
 const CACHE_TTL_MS = 60_000;
 
 const I18N = {
@@ -792,8 +792,7 @@ class BirdfyMomentsCard extends HTMLElement {
     const summarySpecies = this.#getSummaryValue("latest_species_entity");
     const summaryTime =
       summarySpeciesEntity?.attributes?.detection_time ||
-      summaryImageEntity?.attributes?.detection_time ||
-      summaryImageEntity?.state;
+      summaryImageEntity?.attributes?.detection_time;
 
     if (speciesEl) {
       speciesEl.textContent = !this.#config.device_id
@@ -810,8 +809,10 @@ class BirdfyMomentsCard extends HTMLElement {
       timeEl.textContent = this.#formatTime(latest?.time || summaryTime);
     }
 
-    const imgUrl =
-      latest?.image_url || summaryImageEntity?.attributes?.entity_picture || "";
+    const summaryImgUrl = summaryImageEntity?.attributes?.detection_time
+      ? summaryImageEntity.attributes.entity_picture
+      : "";
+    const imgUrl = latest?.image_url || summaryImgUrl || "";
     if (heroImg && imgUrl && heroImg.getAttribute("src") !== imgUrl) {
       heroImg.setAttribute("src", imgUrl);
     } else if (heroImg && !imgUrl) {
