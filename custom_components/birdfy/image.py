@@ -17,7 +17,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import BirdfyHighlightsCoordinator, BirdfyMomentsCoordinator
-from .entity_data import last_moment_image_attributes
+from .entity_data import (
+    last_moment_detection_time,
+    last_moment_image_attributes,
+)
 from .media import highlight_timestamp, image_url_for_highlights, latest_highlight
 
 _LOGGER = logging.getLogger(__name__)
@@ -239,15 +242,11 @@ class BirdfyLastMomentImage(CoordinatorEntity, ImageEntity):
         value = self._last_moment().get("image_url")
         return value if isinstance(value, str) and value else None
 
-    def _detection_time(self) -> datetime:
-        """Return the latest detection time or current time."""
-        try:
-            timestamp = int(self._last_moment().get("time") or 0)
-        except (TypeError, ValueError):
-            timestamp = 0
-        if timestamp > 0:
-            return datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-        return datetime.now(UTC)
+    def _detection_time(self) -> datetime | None:
+        """Return the latest real detection time, if one exists."""
+        if self.coordinator.data is None:
+            return None
+        return last_moment_detection_time(self.coordinator.data)
 
     async def async_image(self) -> bytes | None:
         """Return bytes of the latest Moment image."""

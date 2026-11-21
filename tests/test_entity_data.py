@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 import unittest
 
@@ -71,6 +72,19 @@ class EntityDataTest(unittest.TestCase):
 
         self.assertEqual(attributes["species"], "Robin")
         self.assertNotIn("url", " ".join(attributes))
+
+    def test_image_timestamp_requires_a_real_moment(self) -> None:
+        """Do not make an empty image entity look freshly updated."""
+        self.assertIsNone(entity_data.last_moment_detection_time({}))
+        self.assertIsNone(
+            entity_data.last_moment_detection_time(
+                {"last_moment": {"time": "invalid"}},
+            )
+        )
+        self.assertEqual(
+            entity_data.last_moment_detection_time(self.data),
+            datetime.fromtimestamp(1781560800000 / 1000, tz=UTC),
+        )
 
 
 if __name__ == "__main__":

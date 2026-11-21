@@ -94,7 +94,7 @@ latest_image_entity: image.garden_birdfy_last_moment
 For YAML-managed Lovelace resources, add this module manually:
 
 ```yaml
-url: /birdfy/birdfy-moments-card.js?v=1.2.2
+url: /birdfy/birdfy-moments-card.js?v=1.2.3
 type: module
 ```
 

@@ -1,7 +1,7 @@
 // Bundled Birdfy card. Moments and temporary media URLs are requested only
 // when the user opens the feed and remain in this card instance's memory.
 
-const CARD_VERSION = "1.2.2";
+const CARD_VERSION = "1.2.3";
 const CACHE_TTL_MS = 60_000;
 
 const I18N = {

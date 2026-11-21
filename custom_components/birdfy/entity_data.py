@@ -66,6 +66,16 @@ def last_moment_image_attributes(
     return attributes
 
 
+def last_moment_detection_time(
+    data: Mapping[str, Any],
+) -> datetime | None:
+    """Return the latest real detection time without inventing a timestamp."""
+    timestamp = _timestamp(_last_moment(data).get("time"))
+    if timestamp <= 0:
+        return None
+    return datetime.fromtimestamp(timestamp / 1000, tz=UTC)
+
+
 def _timestamp(value: object) -> int:
     """Normalize a millisecond timestamp."""
     try:
